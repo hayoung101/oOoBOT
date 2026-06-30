@@ -65,18 +65,25 @@ def transcribe_audio(client, audio):
     return None
 
 # 전사된 텍스트를 OpenAI LLM를 통해 의도 분석
-def ask_intent_to_openai(client, usertext):
+def ask_intent_to_openai(client, usertext, prev_intent=None):
     try:
         response = client.responses.create(
             model=OPENAI_MODEL,
             input=[
                 {
                     "role": "developer",
-                    "content": "너는 사용자가 하는 말의 의도를 최대한 정확하게 알아듣는 의도 파악 전문가야.",
+                    "content": "너는 사용자가 하는 말의 의도를 최대한 정확하게 알아듣는 의도 파악 전문가야."
+                    "입력은 '직전 상황(prev_intent)'과 이번에 해석할 '새 발화(utterance)'로 나뉜다. prev_intent는 직전까지 파악된 맥락이고, 이번에 해석할 대상은 오직 새 발화다."
+                    "number(인원)는 대화 내내 이어지는 맥락이다. 새 발화가 '테이블이 너무 작은데?', '더 크게', '원래대로'처럼 이미 구성된 가구를 평가·조정하는 말이면, 인원수를 새로 세지 말고 prev_intent의 number를 '그대로' 유지하라. 이런 조정성 발화에서 발화에 사람이 명시되지 않았다고 number를 1로 줄이지 마라."
+                    "number를 바꾸는 경우는 다음 두 가지뿐이다: (1) 새 발화가 이전과 다른 '새로운 상황/장면'을 묘사할 때(예: '아 졸려', '이제 일하자', '손님 오신다'), (2) 누군가 '합류하거나 떠나는' 정황이 분명할 때(예: '친구 한 명 더 왔어', '다들 갔어', '나 혼자 남았어'). 그 외에는 prev_intent의 number를 유지하라."
+                    "prev_intent가 null이면(첫 발화) 발화에서 직접 인원을 파악하라. situation·activity·furniture는 새 발화에 맞게 갱신하되, 맥락이 이어지는 조정성 발화라면 prev_intent를 참고해 일관되게 채워라.",
                 },
                 {
                     "role": "user",
-                    "content": usertext,
+                    "content": json.dumps({
+                        "직전 상황(prev_intent)": prev_intent,
+                        "새 발화(utterance)": usertext,
+                    }, ensure_ascii=False),
                 },
             ],
             text={
@@ -136,13 +143,15 @@ def ask_action_to_openai(client, intent, history):
                     "입력은 '과거 기록(history)'와 '지금 처리할 새 요청(new_request)' 두 부분으로 구분돼 있어. 이번에 처리할 명령은 오직 '새 요청'이고, '과거 기록'은 '원래대로', '더 크게' 같은 상대적 표현을 해석하기 위한 참고용일 뿐이니 새 요청으로 착각하지 마."
                     "history의 가장 최근 항목이 로봇 4대의 현재 상태다. 매번 4대(L BOT 1, L BOT 2, H BOT 1, H BOT 2) 전체 상태를 절대값으로 출력해. 이번 요청과 직접 관련 없는 로봇은 현재 상태(history 최신 항목) 값을 그대로 유지해 출력하라. 멋대로 기본값으로 되돌리거나 끄지 마라."
                     "size는 [0, 25, 50, 75, 100] 다섯 단계 중 하나를 쓴다. furniture는 완전히 자유로운 라벨이며 정해진 이름 목록이 없다. 실제 명령값은 size이고 furniture는 그 형태를 맥락에 맞게 표현한 이름일 뿐이다."
-                    "'더 크게/작게', '너무 작다/크다'처럼 크기를 바꾸라는 요청에는 furniture 라벨만 바꾸지 말고 반드시 size를 실제로 한 단계 이상 올리거나 내려라. history 최신 항목의 현재 size를 기준으로 조정하고, 바뀐 형태에 맞는 라벨을 다시 붙여라. 이런 크기 조정은 현재 그 가구로 쓰이는 모든 로봇에 같이 적용하라."
+                    "'더 크게/작게', '너무 작다/크다'처럼 크기를 바꾸라는 요청은 두 경우로 나눠 처리하라. (가) 담는 용도(중간 size의 그릇·바구니·트레이)라면 furniture 라벨만 바꾸지 말고 size를 실제로 한 단계 이상 올리거나 내려 깊이·넓이를 조정하라. history 최신 항목의 현재 size를 기준으로 조정하고, 바뀐 형태에 맞는 라벨을 다시 붙여라. (나) 평평한 면으로 쓰는 가구(테이블=size 100, 좌석·발받침=size 0)는 size를 바꾸면 평면이 깨져 용도를 잃는다 — 이런 평면 가구가 '너무 작다/더 크게'면 size는 그대로 두고, 같은 용도의 로봇을 한 대 더 붙여(복합 가구로 연결) 면적을 넓혀라. 어느 경우든 이 조정은 현재 그 가구로 쓰이는 모든 로봇에 같이 적용하라."
                     "'치워', '그만', '다 접어', '정리하자'처럼 사용 종료·정리를 뜻하는 말에는 해당 로봇들을 active='inactive', size=0으로 되돌려라. (수납가구로 변형하라는 뜻이 아니라, 로봇을 접어 쉬게 하라는 뜻이다.) 정리할 때 위치(x,y)는 0으로 되돌려라."
                     "이제 size에 더해 각 로봇의 위치(x, y)도 함께 출력한다. 좌표계는 '배치 중심점' (0,0)을 기준으로 한 직교좌표를 쓴다. (0,0)은 사용자 위치가 아니라 가구 세트를 배치하는 중심점이며, 이 중심을 기준으로 앞·뒤·좌·우를 구분한다. x는 좌(-)/우(+), y는 앞(+)/뒤(-)이고 단위는 cm다. 로봇 윗면은 원형이라 방향(회전)은 의미가 없으므로 위치(x,y)만 정하면 된다. "
                     "핵심: 같은 size라도 '어디에 두느냐'에 따라 가구의 의미가 달라진다. 위치까지 정하면 의자/발받침대/협탁 구분이 라벨이 아니라 좌표에서 자연스럽게 유도된다. 예를 들어 size 0인 낮은 L BOT을 사용자 바로 앞 가까이(작은 +y)에 두면 '발받침대', 사용자 옆(±x)에 두면 '낮은 협탁', 앉을 자리에 두면 '낮은 의자'가 된다. 위치는 사용자의 동선과 손이 닿는 범위를 고려해 자연스럽게 정하고, furniture 라벨도 그 위치·형태에 맞게 붙여라. "
                     "여러 로봇을 쓸 때는 서로 겹치지 않게 충분히 떨어뜨려라(중심 간 대략 40cm 이상 권장). 배치 가능한 영역은 중심에서 반경 약 200cm 이내다. 단, 충돌·도달가능성의 '최종' 안전 검증은 코드(결정론적 레이어)가 책임지므로, 너는 물리적으로 그럴듯한 배치를 제안하는 데 집중하면 된다. "
                     "size와 마찬가지로, 이번 요청과 직접 관련 없는 로봇의 위치(x,y)도 history 최신 상태값을 그대로 유지해 출력하라. 멋대로 0으로 되돌리지 마라."
-                    "입력 받은 사용자의 인원수, 상황, 행동, 필요한 가구에 맞게 로봇의 대수와 위치, 그 로봇이 수행해야 할 행동을 제안해줘."
+                    "intent의 number(인원)를 적극 반영하라. 단, size는 인원수에 비례해 올리는 값이 '아니다' — size는 용도에 맞는 윗면 형태(평평한 면=0 또는 100, 담는 그릇=중간 25·50·75)를 고르는 값이다. 그러니 인원이 많아 더 넓은 면적이나 더 많은 좌석이 필요할 때는 size를 어중간하게 올리지 말고, ⓐ같은 용도의 로봇을 한 대 더 쓰거나 ⓑ여러 대를 인접 연결해 복합 가구로 넓혀라. 예: 테이블이 좁다고 size를 75로 내리면 평면이 아니라 오목한 트레이가 되어 테이블이 못 된다 — 대신 size 100짜리 H BOT을 한 대 더 옆에 붙여 더 큰 테이블로 만든다. 좌석이 더 필요하면 size 0 L BOT을 한 대 더 둔다. '테이블이 너무 작은데?' 같은 조정 요청도 size를 바꾸는 게 아니라 이렇게 면적을 키우라는 뜻으로 해석하라."
+                    "로봇은 한 대씩 독립된 가구로만 쓰는 게 아니라, 여러 대를 인접하게 붙여(위치 x,y를 맞닿게) 하나의 더 큰 '복합 가구'로 합칠 수 있다. 예: H BOT 두 대를 size 100으로 양옆에 붙이면 다인용 대형 테이블이 되고, L BOT 두 대를 size 100으로 붙이면 침대처럼 넓은 평면이 된다. 이건 정해진 목록이 아니라 가능성의 예시일 뿐이니, 인원·상황에 맞는 새로운 조합도 자유롭게 구성하라. 복합 가구로 붙일 때는 두 로봇이 같은 자리에 포개지지 않고 가장자리(윗면)만 맞닿도록 위치를 두어라(중심 간 거리 ≈ 두 윗면 반지름의 합). 한 복합 가구를 이루는 로봇들에는 그 사실이 드러나는 일관된 furniture 라벨을 붙여라(예: 둘 다 '대형 테이블')."
+                    "입력 받은 사용자의 인원수, 상황, 행동, 필요한 가구에 맞게 로봇의 대수와 위치, 단독/복합 구성, 그 로봇이 수행해야 할 행동을 제안해줘."
                 },
                 {
                     "role": "user",
@@ -271,11 +280,11 @@ def default_inactive_command():
 
 # 위치 검증용 상수 (결정론적 안전 레이어)
 WORKSPACE_RADIUS_CM = 200      # 배치 중심 (0,0)에서 가구를 둘 수 있는 최대 반경
-BASE_FOOTPRINT_CM = 15         # 로봇 본체 바닥 반경
-SIZE_SPREAD_CM = 25            # size 100일 때 윗면이 더 차지하는 추가 반경
+BASE_FOOTPRINT_CM = 15         # 로봇 본체 바닥 반경 (윗면 형태와 무관하게 차지하는 최소 영역)
+SIZE_SPREAD_CM = 25            # size 100일 때 윗면(상판)이 바닥보다 더 뻗는 추가 반경(오버행)
 
-def footprint_radius(size):
-    # size가 클수록 윗면이 넓어지므로 차지하는 반경도 커진다.
+def top_radius(size):
+    # 윗면(상판)의 반경. size가 클수록 넓어진다. 복합 가구로 옆 로봇과 맞닿게 둘 때 참고용.
     return BASE_FOOTPRINT_CM + (max(0, min(100, size)) / 100.0) * SIZE_SPREAD_CM
 
 def _coerce_number(value, default=0):
@@ -303,18 +312,21 @@ def _normalize_position(robot):
     robot["x"] = int(x)
     robot["y"] = int(y)
 
-# 충돌 차단(결정론적 안전 레이어): 두 로봇의 풋프린트가 겹치면 나중 로봇을 inactive로 내린다.
+# 충돌 차단(결정론적 안전 레이어): 두 로봇의 '본체 바닥'이 겹치면 나중 로봇을 inactive로 내린다.
+# 충돌 기준은 넓은 윗면(상판)이 아니라 바닥 반경이다 — 상판은 서로 맞닿거나 살짝 겹쳐 복합 가구(붙인 테이블/침대)를
+# 이룰 수 있으므로, 의도적 '연결'은 허용하되 같은 자리에 포개지는 것만 막는다.
 # 안전 검증은 LLM이 아니라 코드가 최종 책임진다.
 def _resolve_collisions(action):
-    accepted = []  # (x, y, radius)
+    accepted = []  # (x, y)
+    min_dist = 2 * BASE_FOOTPRINT_CM  # 두 본체 바닥이 맞닿는 최소 중심간 거리
     # 우선순위: l_bots → h_bots, 목록에 나온 순서대로. 먼저 받아들여진 로봇이 자리를 차지한다.
     for robot in _iter_robots(action):
         if robot.get("active") != "active":
             continue
-        x, y, r = robot.get("x", 0), robot.get("y", 0), footprint_radius(robot.get("size", 0))
+        x, y = robot.get("x", 0), robot.get("y", 0)
         collided = False
-        for ax, ay, ar in accepted:
-            if math.hypot(x - ax, y - ay) < (r + ar):
+        for ax, ay in accepted:
+            if math.hypot(x - ax, y - ay) < min_dist:
                 collided = True
                 break
         if collided:
@@ -326,7 +338,7 @@ def _resolve_collisions(action):
             robot["x"] = 0
             robot["y"] = 0
         else:
-            accepted.append((x, y, r))
+            accepted.append((x, y))
 
 # 3. 명령 객체 검증 (furniture는 자유 라벨이므로 가두지 않는다)
 def validate_robot_action(action):
@@ -379,6 +391,9 @@ def main():
         recognizer.adjust_for_ambient_noise(source, duration=1)
         print("Hold Space to record. Release Space to transcribe. Press Ctrl+C to stop.")
 
+        # 직전 의도(특히 number 인원수)는 대화 맥락이므로 다음 발화 분석에 넘겨 유지한다.
+        last_intent = None
+
         while True:
             if not is_space_pressed():
                 time.sleep(POLL_SECONDS)
@@ -393,10 +408,12 @@ def main():
             if not text:
                 continue
 
-            # 2) 의도 분석
-            result_intent = ask_intent_to_openai(openai_client, text)
+            # 2) 의도 분석 (직전 의도를 넘겨 number 등 맥락 유지)
+            result_intent = ask_intent_to_openai(openai_client, text, last_intent)
             if not result_intent:
                 continue
+            # 다음 발화의 맥락 유지를 위해 직전 의도를 갱신
+            last_intent = result_intent
 
             # 3) 명령 생성 (최근 history만 전달. history 최신 항목이 곧 현재 4대 상태)
             raw_robot_action = ask_action_to_openai(
