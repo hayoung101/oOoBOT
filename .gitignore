@@ -1,0 +1,23 @@
+# 환경 변수 / 비밀 키 (절대 커밋 금지)
+.env
+.env.local
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# 오디오 / 임시 산출물
+*.wav
+*.mp3
+*.log
+
+# OS / 에디터
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
