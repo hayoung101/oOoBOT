@@ -1,6 +1,7 @@
 import ctypes
 from io import BytesIO
 import json
+import math
 import os
 from dotenv import load_dotenv
 load_dotenv()
@@ -136,8 +137,12 @@ def ask_action_to_openai(client, intent, history):
                     "history의 가장 최근 항목이 로봇 4대의 현재 상태다. 매번 4대(L BOT 1, L BOT 2, H BOT 1, H BOT 2) 전체 상태를 절대값으로 출력해. 이번 요청과 직접 관련 없는 로봇은 현재 상태(history 최신 항목) 값을 그대로 유지해 출력하라. 멋대로 기본값으로 되돌리거나 끄지 마라."
                     "size는 [0, 25, 50, 75, 100] 다섯 단계 중 하나를 쓴다. furniture는 완전히 자유로운 라벨이며 정해진 이름 목록이 없다. 실제 명령값은 size이고 furniture는 그 형태를 맥락에 맞게 표현한 이름일 뿐이다."
                     "'더 크게/작게', '너무 작다/크다'처럼 크기를 바꾸라는 요청에는 furniture 라벨만 바꾸지 말고 반드시 size를 실제로 한 단계 이상 올리거나 내려라. history 최신 항목의 현재 size를 기준으로 조정하고, 바뀐 형태에 맞는 라벨을 다시 붙여라. 이런 크기 조정은 현재 그 가구로 쓰이는 모든 로봇에 같이 적용하라."
-                    "'치워', '그만', '다 접어', '정리하자'처럼 사용 종료·정리를 뜻하는 말에는 해당 로봇들을 active='inactive', size=0으로 되돌려라. (수납가구로 변형하라는 뜻이 아니라, 로봇을 접어 쉬게 하라는 뜻이다.)"
-                    "입력 받은 사용자의 인원수, 상황, 행동, 필요한 가구에 맞게 로봇의 대수와 그 로봇이 수행해야 할 행동을 제안해줘."
+                    "'치워', '그만', '다 접어', '정리하자'처럼 사용 종료·정리를 뜻하는 말에는 해당 로봇들을 active='inactive', size=0으로 되돌려라. (수납가구로 변형하라는 뜻이 아니라, 로봇을 접어 쉬게 하라는 뜻이다.) 정리할 때 위치(x,y)는 0으로 되돌려라."
+                    "이제 size에 더해 각 로봇의 위치(x, y)도 함께 출력한다. 좌표계는 '배치 중심점' (0,0)을 기준으로 한 직교좌표를 쓴다. (0,0)은 사용자 위치가 아니라 가구 세트를 배치하는 중심점이며, 이 중심을 기준으로 앞·뒤·좌·우를 구분한다. x는 좌(-)/우(+), y는 앞(+)/뒤(-)이고 단위는 cm다. 로봇 윗면은 원형이라 방향(회전)은 의미가 없으므로 위치(x,y)만 정하면 된다. "
+                    "핵심: 같은 size라도 '어디에 두느냐'에 따라 가구의 의미가 달라진다. 위치까지 정하면 의자/발받침대/협탁 구분이 라벨이 아니라 좌표에서 자연스럽게 유도된다. 예를 들어 size 0인 낮은 L BOT을 사용자 바로 앞 가까이(작은 +y)에 두면 '발받침대', 사용자 옆(±x)에 두면 '낮은 협탁', 앉을 자리에 두면 '낮은 의자'가 된다. 위치는 사용자의 동선과 손이 닿는 범위를 고려해 자연스럽게 정하고, furniture 라벨도 그 위치·형태에 맞게 붙여라. "
+                    "여러 로봇을 쓸 때는 서로 겹치지 않게 충분히 떨어뜨려라(중심 간 대략 40cm 이상 권장). 배치 가능한 영역은 중심에서 반경 약 200cm 이내다. 단, 충돌·도달가능성의 '최종' 안전 검증은 코드(결정론적 레이어)가 책임지므로, 너는 물리적으로 그럴듯한 배치를 제안하는 데 집중하면 된다. "
+                    "size와 마찬가지로, 이번 요청과 직접 관련 없는 로봇의 위치(x,y)도 history 최신 상태값을 그대로 유지해 출력하라. 멋대로 0으로 되돌리지 마라."
+                    "입력 받은 사용자의 인원수, 상황, 행동, 필요한 가구에 맞게 로봇의 대수와 위치, 그 로봇이 수행해야 할 행동을 제안해줘."
                 },
                 {
                     "role": "user",
@@ -179,9 +184,17 @@ def ask_action_to_openai(client, intent, history):
                                             "type": "number",
                                             "enum": [0, 25, 50, 75, 100],
                                             "description": "로봇의 확장 단계. 0=완전 축소, 25=조금 확장, 50=중간, 75=많이 확장, 100=완전 확장. 이 다섯 단계 중 하나만 사용."
+                                        },
+                                        "x": {
+                                            "type": "number",
+                                            "description": "배치 중심점 (0,0) 기준 좌우 위치(cm). 좌는 음수(-), 우는 양수(+). inactive면 0."
+                                        },
+                                        "y": {
+                                            "type": "number",
+                                            "description": "배치 중심점 (0,0) 기준 앞뒤 위치(cm). 앞(사용자 정면 방향)은 양수(+), 뒤는 음수(-). inactive면 0."
                                         }
                                     },
-                                    "required": ["robot", "active", "furniture", "size"],
+                                    "required": ["robot", "active", "furniture", "size", "x", "y"],
                                     "additionalProperties": False,
                                 }
                             },
@@ -209,9 +222,17 @@ def ask_action_to_openai(client, intent, history):
                                             "type": "number",
                                             "enum": [0, 25, 50, 75, 100],
                                             "description": "로봇의 확장 단계. 0=완전 축소, 25=조금 확장, 50=중간, 75=많이 확장, 100=완전 확장. 이 다섯 단계 중 하나만 사용."
+                                        },
+                                        "x": {
+                                            "type": "number",
+                                            "description": "배치 중심점 (0,0) 기준 좌우 위치(cm). 좌는 음수(-), 우는 양수(+). inactive면 0."
+                                        },
+                                        "y": {
+                                            "type": "number",
+                                            "description": "배치 중심점 (0,0) 기준 앞뒤 위치(cm). 앞(사용자 정면 방향)은 양수(+), 뒤는 음수(-). inactive면 0."
                                         }
                                     },
-                                    "required": ["robot", "active", "furniture", "size"],
+                                    "required": ["robot", "active", "furniture", "size", "x", "y"],
                                     "additionalProperties": False,
                                 }
                             }
@@ -239,38 +260,107 @@ command_history = []
 def default_inactive_command():
     return {
         "l_bots": [
-            {"robot": "L BOT 1", "active": "inactive", "furniture": "none", "size": 0},
-            {"robot": "L BOT 2", "active": "inactive", "furniture": "none", "size": 0},
+            {"robot": "L BOT 1", "active": "inactive", "furniture": "none", "size": 0, "x": 0, "y": 0},
+            {"robot": "L BOT 2", "active": "inactive", "furniture": "none", "size": 0, "x": 0, "y": 0},
         ],
         "h_bots": [
-            {"robot": "H BOT 1", "active": "inactive", "furniture": "none", "size": 0},
-            {"robot": "H BOT 2", "active": "inactive", "furniture": "none", "size": 0},
+            {"robot": "H BOT 1", "active": "inactive", "furniture": "none", "size": 0, "x": 0, "y": 0},
+            {"robot": "H BOT 2", "active": "inactive", "furniture": "none", "size": 0, "x": 0, "y": 0},
         ],
     }
+
+# 위치 검증용 상수 (결정론적 안전 레이어)
+WORKSPACE_RADIUS_CM = 200      # 배치 중심 (0,0)에서 가구를 둘 수 있는 최대 반경
+BASE_FOOTPRINT_CM = 15         # 로봇 본체 바닥 반경
+SIZE_SPREAD_CM = 25            # size 100일 때 윗면이 더 차지하는 추가 반경
+
+def footprint_radius(size):
+    # size가 클수록 윗면이 넓어지므로 차지하는 반경도 커진다.
+    return BASE_FOOTPRINT_CM + (max(0, min(100, size)) / 100.0) * SIZE_SPREAD_CM
+
+def _coerce_number(value, default=0):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return default
+    if math.isnan(value) or math.isinf(value):
+        return default
+    return value
+
+def _iter_robots(action):
+    for key in ("l_bots", "h_bots"):
+        for robot in action.get(key, []):
+            yield robot
+
+# 위치 정규화: 좌표를 정수 cm로 만들고, 워크스페이스 반경 밖이면 안쪽으로 끌어들인다.
+def _normalize_position(robot):
+    x = round(_coerce_number(robot.get("x", 0)))
+    y = round(_coerce_number(robot.get("y", 0)))
+    # 중심 (0,0)에서 너무 멀면(도달 불가) 반경 안으로 스케일해 끌어들인다.
+    dist = math.hypot(x, y)
+    if dist > WORKSPACE_RADIUS_CM:
+        scale = WORKSPACE_RADIUS_CM / dist
+        x = round(x * scale)
+        y = round(y * scale)
+    robot["x"] = int(x)
+    robot["y"] = int(y)
+
+# 충돌 차단(결정론적 안전 레이어): 두 로봇의 풋프린트가 겹치면 나중 로봇을 inactive로 내린다.
+# 안전 검증은 LLM이 아니라 코드가 최종 책임진다.
+def _resolve_collisions(action):
+    accepted = []  # (x, y, radius)
+    # 우선순위: l_bots → h_bots, 목록에 나온 순서대로. 먼저 받아들여진 로봇이 자리를 차지한다.
+    for robot in _iter_robots(action):
+        if robot.get("active") != "active":
+            continue
+        x, y, r = robot.get("x", 0), robot.get("y", 0), footprint_radius(robot.get("size", 0))
+        collided = False
+        for ax, ay, ar in accepted:
+            if math.hypot(x - ax, y - ay) < (r + ar):
+                collided = True
+                break
+        if collided:
+            # 겹치면 안전을 위해 이 로봇을 접는다(충돌 차단).
+            print("[validate] 충돌 감지 -> {0} inactive 처리 (위치 {1})".format(
+                robot.get("robot"), (x, y)))
+            robot["active"] = "inactive"
+            robot["size"] = 0
+            robot["x"] = 0
+            robot["y"] = 0
+        else:
+            accepted.append((x, y, r))
 
 # 3. 명령 객체 검증 (furniture는 자유 라벨이므로 가두지 않는다)
 def validate_robot_action(action):
     if not action:
         return default_inactive_command()
 
-    for key in ("l_bots", "h_bots"):
-        for robot in action.get(key, []):
-            # size를 0~100 범위로 clamp
-            size = robot.get("size", 0)
-            if not isinstance(size, (int, float)):
-                size = 0
-            if size < 0:
-                size = 0
-            elif size > 100:
-                size = 100
-            # enum 밖 값(예: 37)이 들어오면 가장 가까운 단계로 스냅 (37 -> 25)
-            size = min((0, 25, 50, 75, 100), key=lambda step: abs(step - size))
-            robot["size"] = size
+    for robot in _iter_robots(action):
+        # size를 0~100 범위로 clamp
+        size = robot.get("size", 0)
+        if not isinstance(size, (int, float)):
+            size = 0
+        if size < 0:
+            size = 0
+        elif size > 100:
+            size = 100
+        # enum 밖 값(예: 37)이 들어오면 가장 가까운 단계로 스냅 (37 -> 25)
+        size = min((0, 25, 50, 75, 100), key=lambda step: abs(step - size))
+        robot["size"] = size
 
-            # active인데 furniture가 비어 있거나 공백이면 inactive로 되돌림
-            furniture = robot.get("furniture", "")
-            if robot.get("active") == "active" and (not furniture or not str(furniture).strip()):
-                robot["active"] = "inactive"
+        # active인데 furniture가 비어 있거나 공백이면 inactive로 되돌림
+        furniture = robot.get("furniture", "")
+        if robot.get("active") == "active" and (not furniture or not str(furniture).strip()):
+            robot["active"] = "inactive"
+
+        # 위치 정규화 (정수 cm + 워크스페이스 반경 안으로)
+        _normalize_position(robot)
+
+        # inactive 로봇은 위치도 0으로 (history 현재상태를 깔끔하게 유지)
+        if robot.get("active") != "active":
+            robot["x"] = 0
+            robot["y"] = 0
+
+    # 충돌·도달가능성 검증은 모든 로봇 정규화 후 한 번에 (결정론적 차단)
+    _resolve_collisions(action)
 
     return action
 
