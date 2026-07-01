@@ -144,13 +144,15 @@ def ask_action_to_openai(client, intent, history):
                     "history의 가장 최근 항목이 로봇 4대의 현재 상태다. 매번 4대(L BOT 1, L BOT 2, H BOT 1, H BOT 2) 전체 상태를 절대값으로 출력해. 이번 요청과 직접 관련 없는 로봇은 현재 상태(history 최신 항목) 값을 그대로 유지해 출력하라. 멋대로 기본값으로 되돌리거나 끄지 마라."
                     "size는 [0, 25, 50, 75, 100] 다섯 단계 중 하나를 쓴다. furniture는 완전히 자유로운 라벨이며 정해진 이름 목록이 없다. 실제 명령값은 size이고 furniture는 그 형태를 맥락에 맞게 표현한 이름일 뿐이다."
                     "'더 크게/작게', '너무 작다/크다'처럼 크기를 바꾸라는 요청은 두 경우로 나눠 처리하라. (가) 담는 용도(중간 size의 그릇·바구니·트레이)라면 furniture 라벨만 바꾸지 말고 size를 실제로 한 단계 이상 올리거나 내려 깊이·넓이를 조정하라. history 최신 항목의 현재 size를 기준으로 조정하고, 바뀐 형태에 맞는 라벨을 다시 붙여라. (나) 평평한 면으로 쓰는 가구(테이블=size 100, 좌석·발받침=size 0)는 size를 바꾸면 평면이 깨져 용도를 잃는다 — 이런 평면 가구가 '너무 작다/더 크게'면 size는 그대로 두고, 같은 용도의 로봇을 한 대 더 붙여(복합 가구로 연결) 면적을 넓혀라. 어느 경우든 이 조정은 현재 그 가구로 쓰이는 모든 로봇에 같이 적용하라."
-                    "'치워', '그만', '다 접어', '정리하자'처럼 사용 종료·정리를 뜻하는 말에는 해당 로봇들을 active='inactive', size=0으로 되돌려라. (수납가구로 변형하라는 뜻이 아니라, 로봇을 접어 쉬게 하라는 뜻이다.) 정리할 때 위치(x,y)는 0으로 되돌려라."
-                    "이제 size에 더해 각 로봇의 위치(x, y)도 함께 출력한다. 좌표계는 '배치 중심점' (0,0)을 기준으로 한 직교좌표를 쓴다. (0,0)은 사용자 위치가 아니라 가구 세트를 배치하는 중심점이며, 이 중심을 기준으로 앞·뒤·좌·우를 구분한다. x는 좌(-)/우(+), y는 앞(+)/뒤(-)이고 단위는 cm다. 로봇 윗면은 원형이라 방향(회전)은 의미가 없으므로 위치(x,y)만 정하면 된다. "
+                    "'치워', '그만', '다 접어', '정리하자'처럼 사용 종료·정리를 뜻하는 말에는 해당 로봇들을 active='inactive', size=0으로 되돌려라. (수납가구로 변형하라는 뜻이 아니라, 로봇을 접어 홈으로 보내 쉬게 하라는 뜻이다.) inactive 로봇의 위치는 코드가 홈으로 정리하므로 신경 쓰지 않아도 된다."
+                    "이제 size에 더해 각 로봇의 위치(x, y)도 함께 출력한다. 좌표계는 사용자가 서 있는 중심 (0,0)을 원점으로 한 직교좌표이고, 사용자는 +y(앞)를 바라본다. x는 좌(-)/우(+), y는 앞(+)/뒤(-)이며 단위는 cm다. 로봇 윗면은 원형이라 방향(회전)은 의미가 없으므로 위치(x,y)만 정하면 된다. "
+                    "가동 공간은 가로 240cm x 세로 200cm이고 사용자가 그 중심에 있으므로, 좌표 범위는 x는 -120~+120, y는 -100~+100이다. 로봇은 실제 크기가 있으니(H BOT 반지름 약 20.5~36cm, L BOT 약 21.5~32.5cm, size가 클수록 큼) 본체가 이 경계를 넘지 않도록 여유를 두고 배치하라(경계를 넘는 좌표는 코드가 안으로 끌어당긴다). "
+                    "미사용(inactive) 로봇은 접힌 채 뒤쪽 좌측 구석 홈(x=-120, y=-100)에서 대기한다. 로봇을 쓰지 않게 되면 그 홈으로 돌려보낸다(코드가 자동 처리하므로 inactive 로봇의 위치는 신경 쓰지 않아도 된다). "
                     "핵심: 같은 size라도 '어디에 두느냐'에 따라 가구의 의미가 달라진다. 위치까지 정하면 의자/발받침대/협탁 구분이 라벨이 아니라 좌표에서 자연스럽게 유도된다. 예를 들어 size 0인 낮은 L BOT을 사용자 바로 앞 가까이(작은 +y)에 두면 '발받침대', 사용자 옆(±x)에 두면 '낮은 협탁', 앉을 자리에 두면 '낮은 의자'가 된다. 위치는 사용자의 동선과 손이 닿는 범위를 고려해 자연스럽게 정하고, furniture 라벨도 그 위치·형태에 맞게 붙여라. "
-                    "여러 로봇을 쓸 때는 서로 겹치지 않게 충분히 떨어뜨려라(중심 간 대략 40cm 이상 권장). 배치 가능한 영역은 중심에서 반경 약 200cm 이내다. 단, 충돌·도달가능성의 '최종' 안전 검증은 코드(결정론적 레이어)가 책임지므로, 너는 물리적으로 그럴듯한 배치를 제안하는 데 집중하면 된다. "
+                    "여러 로봇을 독립 가구로 쓸 때는 서로 본체가 겹치지 않게 떨어뜨려라(중심 간 거리가 두 로봇 반지름의 합보다 크도록). 단, 충돌·경계의 '최종' 안전 검증은 코드(결정론적 레이어)가 책임지므로, 너는 물리적으로 그럴듯한 배치를 제안하는 데 집중하면 된다. "
                     "size와 마찬가지로, 이번 요청과 직접 관련 없는 로봇의 위치(x,y)도 history 최신 상태값을 그대로 유지해 출력하라. 멋대로 0으로 되돌리지 마라."
                     "intent의 number(인원)를 적극 반영하라. 단, size는 인원수에 비례해 올리는 값이 '아니다' — size는 용도에 맞는 윗면 형태(평평한 면=0 또는 100, 담는 그릇=중간 25·50·75)를 고르는 값이다. 그러니 인원이 많아 더 넓은 면적이나 더 많은 좌석이 필요할 때는 size를 어중간하게 올리지 말고, ⓐ같은 용도의 로봇을 한 대 더 쓰거나 ⓑ여러 대를 인접 연결해 복합 가구로 넓혀라. 예: 테이블이 좁다고 size를 75로 내리면 평면이 아니라 오목한 트레이가 되어 테이블이 못 된다 — 대신 size 100짜리 H BOT을 한 대 더 옆에 붙여 더 큰 테이블로 만든다. 좌석이 더 필요하면 size 0 L BOT을 한 대 더 둔다. '테이블이 너무 작은데?' 같은 조정 요청도 size를 바꾸는 게 아니라 이렇게 면적을 키우라는 뜻으로 해석하라."
-                    "로봇은 한 대씩 독립된 가구로만 쓰는 게 아니라, 여러 대를 인접하게 붙여(위치 x,y를 맞닿게) 하나의 더 큰 '복합 가구'로 합칠 수 있다. 예: H BOT 두 대를 size 100으로 양옆에 붙이면 다인용 대형 테이블이 되고, L BOT 두 대를 size 100으로 붙이면 침대처럼 넓은 평면이 된다. 이건 정해진 목록이 아니라 가능성의 예시일 뿐이니, 인원·상황에 맞는 새로운 조합도 자유롭게 구성하라. 복합 가구로 붙일 때는 두 로봇이 같은 자리에 포개지지 않고 가장자리(윗면)만 맞닿도록 위치를 두어라(중심 간 거리 ≈ 두 윗면 반지름의 합). 한 복합 가구를 이루는 로봇들에는 그 사실이 드러나는 일관된 furniture 라벨을 붙여라(예: 둘 다 '대형 테이블')."
+                    "로봇은 한 대씩 독립된 가구로만 쓰는 게 아니라, 여러 대를 인접하게 붙여(위치 x,y를 맞닿게) 하나의 더 큰 '복합 가구'로 합칠 수 있다. 예: H BOT 두 대를 size 100으로 양옆에 붙이면 다인용 대형 테이블이 되고, L BOT 두 대를 size 100으로 붙이면 침대처럼 넓은 평면이 된다. 이건 정해진 목록이 아니라 가능성의 예시일 뿐이니, 인원·상황에 맞는 새로운 조합도 자유롭게 구성하라. 복합 가구로 붙일 때는 두 로봇이 같은 자리에 포개지지 않고 가장자리만 맞닿도록, 중심 간 거리를 '두 로봇 반지름의 합' 정도로 두어라. 예: H BOT 두 대를 size 100으로 연결하면 중심 간 약 72cm(예: x=-36과 x=+36), L BOT 두 대를 size 100으로 연결하면 약 65cm 간격이다. 한 복합 가구를 이루는 로봇들에는 그 사실이 드러나는 일관된 furniture 라벨을 붙여라(예: 둘 다 '대형 테이블')."
                     "입력 받은 사용자의 인원수, 상황, 행동, 필요한 가구에 맞게 로봇의 대수와 위치, 단독/복합 구성, 그 로봇이 수행해야 할 행동을 제안해줘."
                 },
                 {
@@ -265,27 +267,51 @@ def ask_action_to_openai(client, intent, history):
 # history의 가장 최근 항목이 곧 로봇 4대의 현재 상태이므로 별도의 현재상태 변수는 두지 않는다.
 command_history = []
 
-# 6. LLM 응답 실패 시 사용할 안전 기본값: 4대 모두 inactive
+# 6. LLM 응답 실패 시 사용할 안전 기본값: 4대 모두 inactive (홈 위치에서 대기)
 def default_inactive_command():
     return {
         "l_bots": [
-            {"robot": "L BOT 1", "active": "inactive", "furniture": "none", "size": 0, "x": 0, "y": 0},
-            {"robot": "L BOT 2", "active": "inactive", "furniture": "none", "size": 0, "x": 0, "y": 0},
+            {"robot": "L BOT 1", "active": "inactive", "furniture": "none", "size": 0, "x": HOME_X_CM, "y": HOME_Y_CM},
+            {"robot": "L BOT 2", "active": "inactive", "furniture": "none", "size": 0, "x": HOME_X_CM, "y": HOME_Y_CM},
         ],
         "h_bots": [
-            {"robot": "H BOT 1", "active": "inactive", "furniture": "none", "size": 0, "x": 0, "y": 0},
-            {"robot": "H BOT 2", "active": "inactive", "furniture": "none", "size": 0, "x": 0, "y": 0},
+            {"robot": "H BOT 1", "active": "inactive", "furniture": "none", "size": 0, "x": HOME_X_CM, "y": HOME_Y_CM},
+            {"robot": "H BOT 2", "active": "inactive", "furniture": "none", "size": 0, "x": HOME_X_CM, "y": HOME_Y_CM},
         ],
     }
 
-# 위치 검증용 상수 (결정론적 안전 레이어)
-WORKSPACE_RADIUS_CM = 200      # 배치 중심 (0,0)에서 가구를 둘 수 있는 최대 반경
-BASE_FOOTPRINT_CM = 15         # 로봇 본체 바닥 반경 (윗면 형태와 무관하게 차지하는 최소 영역)
-SIZE_SPREAD_CM = 25            # size 100일 때 윗면(상판)이 바닥보다 더 뻗는 추가 반경(오버행)
+# --- 물리 치수 / 공간 상수 (cm) (결정론적 안전 레이어) ---
+# 가동 공간은 240(가로) x 200(세로). 사용자는 중심 (0,0)에 서서 +y(앞)를 바라본다고 가정.
+WORKSPACE_X_CM = 120     # 중심 기준 좌우 한계 (x ∈ [-120, +120], 전체 240)
+WORKSPACE_Y_CM = 100     # 중심 기준 앞뒤 한계 (y ∈ [-100, +100], 전체 200)
 
-def top_radius(size):
-    # 윗면(상판)의 반경. size가 클수록 넓어진다. 복합 가구로 옆 로봇과 맞닿게 둘 때 참고용.
-    return BASE_FOOTPRINT_CM + (max(0, min(100, size)) / 100.0) * SIZE_SPREAD_CM
+# 미사용(inactive) 로봇이 접힌 채 대기하는 홈(뒤쪽 좌측 구석)
+HOME_X_CM = -120
+HOME_Y_CM = -100
+
+# 로봇 종류별 반지름(cm): size 0(base) ~ size 100(top)을 선형 보간.
+#   H BOT: 41x41(size0) -> 72x72(size100)  => 반지름 20.5 -> 36.0
+#   L BOT: 43x43(size0) -> 65x65(size100)  => 반지름 21.5 -> 32.5
+ROBOT_RADIUS_CM = {
+    "H": (20.5, 36.0),
+    "L": (21.5, 32.5),
+}
+
+# 의도적 '연결'(복합 가구)에서 정수 반올림 오차를 흡수할 여유 (cm)
+CONNECT_SLACK_CM = 2
+
+def _robot_kind(robot):
+    # 이름 앞글자로 종류 판별 ("H BOT 1" -> H, "L BOT 2" -> L)
+    return "H" if str(robot.get("robot", "")).upper().startswith("H") else "L"
+
+def robot_radius(robot):
+    # 현재 size에서 로봇이 차지하는 반지름(cm). base~top 선형 보간.
+    base, top = ROBOT_RADIUS_CM[_robot_kind(robot)]
+    size = robot.get("size", 0)
+    if not isinstance(size, (int, float)):
+        size = 0
+    size = max(0, min(100, size))
+    return base + (top - base) * (size / 100.0)
 
 def _coerce_number(value, default=0):
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -299,46 +325,46 @@ def _iter_robots(action):
         for robot in action.get(key, []):
             yield robot
 
-# 위치 정규화: 좌표를 정수 cm로 만들고, 워크스페이스 반경 밖이면 안쪽으로 끌어들인다.
+# 위치 정규화: 좌표를 정수 cm로 만들고, 로봇 본체가 가동 공간(240x200) 밖으로 나가지 않게 안으로 clamp.
 def _normalize_position(robot):
     x = round(_coerce_number(robot.get("x", 0)))
     y = round(_coerce_number(robot.get("y", 0)))
-    # 중심 (0,0)에서 너무 멀면(도달 불가) 반경 안으로 스케일해 끌어들인다.
-    dist = math.hypot(x, y)
-    if dist > WORKSPACE_RADIUS_CM:
-        scale = WORKSPACE_RADIUS_CM / dist
-        x = round(x * scale)
-        y = round(y * scale)
-    robot["x"] = int(x)
-    robot["y"] = int(y)
+    # 로봇 반지름만큼 여유를 두어 본체 전체가 경계 안에 들어오도록 중심을 사각형 안으로 제한한다.
+    r = robot_radius(robot)
+    xlim = max(0, WORKSPACE_X_CM - r)
+    ylim = max(0, WORKSPACE_Y_CM - r)
+    x = max(-xlim, min(xlim, x))
+    y = max(-ylim, min(ylim, y))
+    robot["x"] = int(round(x))
+    robot["y"] = int(round(y))
 
-# 충돌 차단(결정론적 안전 레이어): 두 로봇의 '본체 바닥'이 겹치면 나중 로봇을 inactive로 내린다.
-# 충돌 기준은 넓은 윗면(상판)이 아니라 바닥 반경이다 — 상판은 서로 맞닿거나 살짝 겹쳐 복합 가구(붙인 테이블/침대)를
-# 이룰 수 있으므로, 의도적 '연결'은 허용하되 같은 자리에 포개지는 것만 막는다.
+# 충돌 차단(결정론적 안전 레이어): 두 로봇의 본체가 물리적으로 겹치면 나중 로봇을 접어 홈으로 보낸다.
+# 중심 간 거리가 두 로봇 반지름의 합보다 작으면(=서로 파고들면) 충돌이다. 정확히 맞닿는 정도는
+# 허용하므로 복합 가구(붙인 테이블/침대)로의 의도적 '연결'은 통과하고, 같은 자리에 포개지는 것만 막는다.
 # 안전 검증은 LLM이 아니라 코드가 최종 책임진다.
 def _resolve_collisions(action):
-    accepted = []  # (x, y)
-    min_dist = 2 * BASE_FOOTPRINT_CM  # 두 본체 바닥이 맞닿는 최소 중심간 거리
+    accepted = []  # (x, y, radius)
     # 우선순위: l_bots → h_bots, 목록에 나온 순서대로. 먼저 받아들여진 로봇이 자리를 차지한다.
     for robot in _iter_robots(action):
         if robot.get("active") != "active":
             continue
-        x, y = robot.get("x", 0), robot.get("y", 0)
+        x, y, r = robot.get("x", 0), robot.get("y", 0), robot_radius(robot)
         collided = False
-        for ax, ay in accepted:
-            if math.hypot(x - ax, y - ay) < min_dist:
+        for ax, ay, ar in accepted:
+            # 반지름 합에서 약간의 여유(CONNECT_SLACK)를 빼, 맞닿는 연결은 허용하고 실제 파고듦만 차단
+            if math.hypot(x - ax, y - ay) < (r + ar - CONNECT_SLACK_CM):
                 collided = True
                 break
         if collided:
-            # 겹치면 안전을 위해 이 로봇을 접는다(충돌 차단).
+            # 겹치면 안전을 위해 이 로봇을 접어 홈으로 보낸다(충돌 차단).
             print("[validate] 충돌 감지 -> {0} inactive 처리 (위치 {1})".format(
                 robot.get("robot"), (x, y)))
             robot["active"] = "inactive"
             robot["size"] = 0
-            robot["x"] = 0
-            robot["y"] = 0
+            robot["x"] = HOME_X_CM
+            robot["y"] = HOME_Y_CM
         else:
-            accepted.append((x, y))
+            accepted.append((x, y, r))
 
 # 3. 명령 객체 검증 (furniture는 자유 라벨이므로 가두지 않는다)
 def validate_robot_action(action):
@@ -363,13 +389,13 @@ def validate_robot_action(action):
         if robot.get("active") == "active" and (not furniture or not str(furniture).strip()):
             robot["active"] = "inactive"
 
-        # 위치 정규화 (정수 cm + 워크스페이스 반경 안으로)
+        # 위치 정규화 (정수 cm + 가동 공간 240x200 안으로)
         _normalize_position(robot)
 
-        # inactive 로봇은 위치도 0으로 (history 현재상태를 깔끔하게 유지)
+        # inactive 로봇은 접힌 채 홈(구석)으로 대기시킨다 (history 현재상태를 깔끔하게 유지)
         if robot.get("active") != "active":
-            robot["x"] = 0
-            robot["y"] = 0
+            robot["x"] = HOME_X_CM
+            robot["y"] = HOME_Y_CM
 
     # 충돌·도달가능성 검증은 모든 로봇 정규화 후 한 번에 (결정론적 차단)
     _resolve_collisions(action)
